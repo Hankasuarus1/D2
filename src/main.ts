@@ -1,11 +1,56 @@
 import "./style.css";
 
-interface Point {
-  x: number;
-  y: number;
+interface DisplayCommand {
+  display(ctx: CanvasRenderingContext2D): void;
+  drag?(x: number, y: number): void;
 }
 
-type Stroke = Point[];
+// A marker line command: holds its own geometry and knows how to draw itself.
+class MarkerStroke implements DisplayCommand {
+  private points: { x: number; y: number }[] = [];
+
+  constructor(
+    startX: number,
+    startY: number,
+    private readonly lineWidth: number = 2,
+    private readonly strokeStyle: string = "#000000",
+    private readonly lineCap: CanvasLineCap = "round",
+  ) {
+    this.points.push({ x: startX, y: startY });
+  }
+
+  drag(x: number, y: number): void {
+    this.points.push({ x, y });
+  }
+
+  display(ctx: CanvasRenderingContext2D): void {
+    if (this.points.length === 0) return;
+
+    ctx.save();
+
+    ctx.lineWidth = this.lineWidth;
+    ctx.lineCap = this.lineCap;
+    ctx.strokeStyle = this.strokeStyle;
+
+    ctx.beginPath();
+
+    const first = this.points[0];
+    ctx.moveTo(first.x, first.y);
+
+    if (this.points.length === 1) {
+      // Single click: draw a tiny line so it shows up
+      ctx.lineTo(first.x + 0.01, first.y + 0.01);
+    } else {
+      for (let i = 1; i < this.points.length; i++) {
+        const p = this.points[i];
+        ctx.lineTo(p.x, p.y);
+      }
+    }
+
+    ctx.stroke();
+    ctx.restore();
+  }
+}
 
 //App setup
 
@@ -14,18 +59,17 @@ const appRoot = (document.querySelector("#app") as HTMLElement | null) ??
 
 appRoot.innerHTML = "";
 
-//Title
+// Title
 const title = document.createElement("h1");
 title.textContent = "Quaint Paint Sketchpad";
 appRoot.appendChild(title);
 
-//Subtitle
+// Subtitle
 const subtitle = document.createElement("p");
-subtitle.textContent =
-  "Draw with the mouse. Use Clear, Undo, Redo to manage your sketch.";
+subtitle.textContent = "Draw with the mouse. Use Clear, Undo, Redo.";
 appRoot.appendChild(subtitle);
 
-//Canvas
+// Canvas
 const canvas = document.createElement("canvas");
 canvas.id = "sketchCanvas";
 canvas.width = 256;
@@ -60,44 +104,23 @@ const redoButton = document.createElement("button");
 redoButton.textContent = "Redo";
 buttonRow.appendChild(redoButton);
 
-//Display list and undo/redo stacks
+//Display list and undo/redo stacks (now command objects)
 
-const strokes: Stroke[] = [];
-const redoStack: Stroke[] = [];
-let currentStroke: Stroke | null = null;
+const displayList: DisplayCommand[] = [];
+const redoStack: DisplayCommand[] = [];
 
+let currentCommand: DisplayCommand | null = null;
 let isDrawing = false;
 
-//Redraw logic
+//Redraw logic (observer)
 
 function redrawCanvas() {
   if (!ctx) return;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  ctx.lineWidth = 2;
-  ctx.lineCap = "round";
-  ctx.strokeStyle = "#000000";
-
-  for (const stroke of strokes) {
-    if (stroke.length === 1) {
-      const p = stroke[0];
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(p.x + 0.01, p.y + 0.01);
-      ctx.stroke();
-      continue;
-    }
-
-    ctx.beginPath();
-    ctx.moveTo(stroke[0].x, stroke[0].y);
-
-    for (let i = 1; i < stroke.length; i++) {
-      const pt = stroke[i];
-      ctx.lineTo(pt.x, pt.y);
-    }
-
-    ctx.stroke();
+  for (const command of displayList) {
+    command.display(ctx);
   }
 }
 
@@ -109,38 +132,42 @@ function notifyDrawingChanged() {
 
 //Mouse interaction
 
-function getPoint(event: MouseEvent): Point {
-  return { x: event.offsetX, y: event.offsetY };
-}
-
 function startDrawing(event: MouseEvent) {
   if (!ctx) return;
-  if (event.button !== 0) return;
+  if (event.button !== 0) return; // left mouse only
 
   isDrawing = true;
 
-  const p = getPoint(event);
+  const startX = event.offsetX;
+  const startY = event.offsetY;
 
-  currentStroke = [p];
-  strokes.push(currentStroke);
+  //Create a new MarkerStroke command
+  const stroke = new MarkerStroke(startX, startY);
 
+  currentCommand = stroke;
+  displayList.push(stroke);
+
+  //New drawing invalidates redo history
   redoStack.length = 0;
 
   notifyDrawingChanged();
 }
 
 function continueDrawing(event: MouseEvent) {
-  if (!isDrawing || !currentStroke) return;
+  if (!isDrawing || !currentCommand) return;
 
-  const p = getPoint(event);
-  currentStroke.push(p);
+  const x = event.offsetX;
+  const y = event.offsetY;
 
-  notifyDrawingChanged();
+  if (typeof currentCommand.drag === "function") {
+    currentCommand.drag(x, y);
+    notifyDrawingChanged();
+  }
 }
 
 function stopDrawing() {
   isDrawing = false;
-  currentStroke = null;
+  currentCommand = null;
 }
 
 canvas.addEventListener("mousedown", startDrawing);
@@ -148,37 +175,33 @@ canvas.addEventListener("mousemove", continueDrawing);
 canvas.addEventListener("mouseup", stopDrawing);
 canvas.addEventListener("mouseleave", stopDrawing);
 
-//Clear button
+//Button behaviors
 
 clearButton.addEventListener("click", () => {
-  strokes.length = 0;
+  displayList.length = 0;
   redoStack.length = 0;
-  currentStroke = null;
+  currentCommand = null;
   notifyDrawingChanged();
 });
 
-//Undo button
-
 undoButton.addEventListener("click", () => {
-  if (strokes.length === 0) return;
+  if (displayList.length === 0) return;
 
-  const popped = strokes.pop();
-  if (popped) {
-    redoStack.push(popped);
-    currentStroke = null;
-    notifyDrawingChanged();
-  }
+  const popped = displayList.pop();
+  if (!popped) return;
+
+  redoStack.push(popped);
+  currentCommand = null;
+  notifyDrawingChanged();
 });
-
-//Redo button
 
 redoButton.addEventListener("click", () => {
   if (redoStack.length === 0) return;
 
   const restored = redoStack.pop();
-  if (restored) {
-    strokes.push(restored);
-    currentStroke = null;
-    notifyDrawingChanged();
-  }
+  if (!restored) return;
+
+  displayList.push(restored);
+  currentCommand = null;
+  notifyDrawingChanged();
 });
