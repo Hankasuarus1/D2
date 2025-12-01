@@ -51,6 +51,39 @@ class MarkerStroke implements DisplayCommand {
   }
 }
 
+//Tool preview command: draws a circle showing marker size at the mouse position.
+class MarkerPreview implements DisplayCommand {
+  private x: number;
+  private y: number;
+
+  constructor(private readonly getLineWidth: () => number) {
+    this.x = 0;
+    this.y = 0;
+  }
+
+  setPosition(x: number, y: number): void {
+    this.x = x;
+    this.y = y;
+  }
+
+  display(ctx: CanvasRenderingContext2D): void {
+    const radius = this.getLineWidth() * 2; // bigger so it's easy to see
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+
+    // Fill + stroke so it's really visible
+    ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+}
+
 //App setup
 
 const appRoot = (document.querySelector("#app") as HTMLElement | null) ??
@@ -66,7 +99,7 @@ appRoot.appendChild(title);
 //Subtitle
 const subtitle = document.createElement("p");
 subtitle.textContent =
-  "Draw with the mouse. Choose Thin or Thick marker, then use Clear / Undo / Redo.";
+  "Draw with the mouse. Choose Thin or Thick marker. A preview circle shows your tool.";
 appRoot.appendChild(subtitle);
 
 //Canvas
@@ -93,7 +126,7 @@ buttonRow.style.gap = "8px";
 buttonRow.style.marginTop = "8px";
 appRoot.appendChild(buttonRow);
 
-// Tool buttons (Step 6)
+// Tool buttons
 const thinButton = document.createElement("button");
 thinButton.textContent = "Thin Marker";
 
@@ -123,9 +156,7 @@ const THICK_WIDTH = 6;
 
 let currentLineWidth = THIN_WIDTH;
 
-// Small helper to update which tool looks selected (inline styling only)
 function updateToolSelection() {
-  // Reset both
   thinButton.style.fontWeight = "normal";
   thickButton.style.fontWeight = "normal";
   thinButton.style.outline = "none";
@@ -140,20 +171,21 @@ function updateToolSelection() {
   }
 }
 
-// Initial tool selection
 updateToolSelection();
 
 thinButton.addEventListener("click", () => {
   currentLineWidth = THIN_WIDTH;
   updateToolSelection();
+  notifyDrawingChanged();
 });
 
 thickButton.addEventListener("click", () => {
   currentLineWidth = THICK_WIDTH;
   updateToolSelection();
+  notifyDrawingChanged();
 });
 
-//Display list and undo/redo stacks (command objects)
+//Display list, undo/redo, and preview
 
 const displayList: DisplayCommand[] = [];
 const redoStack: DisplayCommand[] = [];
@@ -161,7 +193,9 @@ const redoStack: DisplayCommand[] = [];
 let currentCommand: DisplayCommand | null = null;
 let isDrawing = false;
 
-//Redraw logic (observer)
+let previewCommand: MarkerPreview | null = null;
+
+// ---- Redraw logic ----
 
 function redrawCanvas() {
   if (!ctx) return;
@@ -171,6 +205,10 @@ function redrawCanvas() {
   for (const command of displayList) {
     command.display(ctx);
   }
+
+  if (!isDrawing && previewCommand) {
+    previewCommand.display(ctx);
+  }
 }
 
 canvas.addEventListener("drawing-changed", redrawCanvas);
@@ -179,11 +217,35 @@ function notifyDrawingChanged() {
   canvas.dispatchEvent(new Event("drawing-changed"));
 }
 
+//tool-moved event support
+
+type ToolMovedDetail = { x: number; y: number };
+
+function notifyToolMoved(x: number, y: number) {
+  const event = new CustomEvent<ToolMovedDetail>("tool-moved", {
+    detail: { x, y },
+  });
+  canvas.dispatchEvent(event);
+}
+
+canvas.addEventListener("tool-moved", (event) => {
+  const customEvent = event as CustomEvent<ToolMovedDetail>;
+  const { x, y } = customEvent.detail;
+
+  if (!previewCommand) {
+    previewCommand = new MarkerPreview(() => currentLineWidth);
+  }
+
+  previewCommand.setPosition(x, y);
+
+  notifyDrawingChanged();
+});
+
 //Mouse interaction
 
 function startDrawing(event: MouseEvent) {
   if (!ctx) return;
-  if (event.button !== 0) return; // left mouse only
+  if (event.button !== 0) return;
 
   isDrawing = true;
 
@@ -221,12 +283,28 @@ function continueDrawing(event: MouseEvent) {
 function stopDrawing() {
   isDrawing = false;
   currentCommand = null;
+  notifyDrawingChanged();
 }
 
 canvas.addEventListener("mousedown", startDrawing);
-canvas.addEventListener("mousemove", continueDrawing);
+
+canvas.addEventListener("mousemove", (event) => {
+  if (isDrawing) {
+    continueDrawing(event);
+  }
+  // Always notify tool movement when the mouse moves over the canvas
+  notifyToolMoved(event.offsetX, event.offsetY);
+});
+
 canvas.addEventListener("mouseup", stopDrawing);
-canvas.addEventListener("mouseleave", stopDrawing);
+
+canvas.addEventListener("mouseleave", () => {
+  // Mouse left the canvas: stop drawing and hide preview
+  isDrawing = false;
+  currentCommand = null;
+  previewCommand = null;
+  notifyDrawingChanged();
+});
 
 //Button behaviors
 
