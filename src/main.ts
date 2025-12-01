@@ -38,7 +38,6 @@ class MarkerStroke implements DisplayCommand {
     ctx.moveTo(first.x, first.y);
 
     if (this.points.length === 1) {
-      // Single click: draw a tiny line so it shows up
       ctx.lineTo(first.x + 0.01, first.y + 0.01);
     } else {
       for (let i = 1; i < this.points.length; i++) {
@@ -59,17 +58,18 @@ const appRoot = (document.querySelector("#app") as HTMLElement | null) ??
 
 appRoot.innerHTML = "";
 
-// Title
+//Title
 const title = document.createElement("h1");
 title.textContent = "Quaint Paint Sketchpad";
 appRoot.appendChild(title);
 
-// Subtitle
+//Subtitle
 const subtitle = document.createElement("p");
-subtitle.textContent = "Draw with the mouse. Use Clear, Undo, Redo.";
+subtitle.textContent =
+  "Draw with the mouse. Choose Thin or Thick marker, then use Clear / Undo / Redo.";
 appRoot.appendChild(subtitle);
 
-// Canvas
+//Canvas
 const canvas = document.createElement("canvas");
 canvas.id = "sketchCanvas";
 canvas.width = 256;
@@ -88,10 +88,22 @@ if (!ctx) {
 
 const buttonRow = document.createElement("div");
 buttonRow.style.display = "flex";
+buttonRow.style.flexWrap = "wrap";
 buttonRow.style.gap = "8px";
 buttonRow.style.marginTop = "8px";
 appRoot.appendChild(buttonRow);
 
+// Tool buttons (Step 6)
+const thinButton = document.createElement("button");
+thinButton.textContent = "Thin Marker";
+
+const thickButton = document.createElement("button");
+thickButton.textContent = "Thick Marker";
+
+buttonRow.appendChild(thinButton);
+buttonRow.appendChild(thickButton);
+
+// Action buttons
 const clearButton = document.createElement("button");
 clearButton.textContent = "Clear";
 buttonRow.appendChild(clearButton);
@@ -104,7 +116,44 @@ const redoButton = document.createElement("button");
 redoButton.textContent = "Redo";
 buttonRow.appendChild(redoButton);
 
-//Display list and undo/redo stacks (now command objects)
+//Tool state (thin / thick)
+
+const THIN_WIDTH = 2;
+const THICK_WIDTH = 6;
+
+let currentLineWidth = THIN_WIDTH;
+
+// Small helper to update which tool looks selected (inline styling only)
+function updateToolSelection() {
+  // Reset both
+  thinButton.style.fontWeight = "normal";
+  thickButton.style.fontWeight = "normal";
+  thinButton.style.outline = "none";
+  thickButton.style.outline = "none";
+
+  if (currentLineWidth === THIN_WIDTH) {
+    thinButton.style.fontWeight = "bold";
+    thinButton.style.outline = "2px solid black";
+  } else if (currentLineWidth === THICK_WIDTH) {
+    thickButton.style.fontWeight = "bold";
+    thickButton.style.outline = "2px solid black";
+  }
+}
+
+// Initial tool selection
+updateToolSelection();
+
+thinButton.addEventListener("click", () => {
+  currentLineWidth = THIN_WIDTH;
+  updateToolSelection();
+});
+
+thickButton.addEventListener("click", () => {
+  currentLineWidth = THICK_WIDTH;
+  updateToolSelection();
+});
+
+//Display list and undo/redo stacks (command objects)
 
 const displayList: DisplayCommand[] = [];
 const redoStack: DisplayCommand[] = [];
@@ -141,13 +190,17 @@ function startDrawing(event: MouseEvent) {
   const startX = event.offsetX;
   const startY = event.offsetY;
 
-  //Create a new MarkerStroke command
-  const stroke = new MarkerStroke(startX, startY);
+  const stroke = new MarkerStroke(
+    startX,
+    startY,
+    currentLineWidth,
+    "#000000",
+    "round",
+  );
 
   currentCommand = stroke;
   displayList.push(stroke);
 
-  //New drawing invalidates redo history
   redoStack.length = 0;
 
   notifyDrawingChanged();
