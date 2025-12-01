@@ -1,4 +1,7 @@
+// main.ts
 import "./style.css";
+
+// ---- Interfaces / command types ----
 
 interface DisplayCommand {
   display(ctx: CanvasRenderingContext2D): void;
@@ -126,6 +129,7 @@ class StickerStamp implements DisplayCommand {
   ) {}
 
   drag(x: number, y: number): void {
+    // For stickers, drag just repositions instead of leaving a trail.
     this.x = x;
     this.y = y;
   }
@@ -141,25 +145,25 @@ class StickerStamp implements DisplayCommand {
   }
 }
 
-//App setup
+// ---- App setup ----
 
 const appRoot = (document.querySelector("#app") as HTMLElement | null) ??
   document.body;
 
 appRoot.innerHTML = "";
 
-//Title
+// Title
 const title = document.createElement("h1");
 title.textContent = "Quaint Paint Sketchpad";
 appRoot.appendChild(title);
 
-//Subtitle
+// Subtitle
 const subtitle = document.createElement("p");
 subtitle.textContent =
   "Draw with markers or place stickers. Use Clear / Undo / Redo.";
 appRoot.appendChild(subtitle);
 
-//Canvas
+// Canvas
 const canvas = document.createElement("canvas");
 canvas.id = "sketchCanvas";
 canvas.width = 256;
@@ -174,7 +178,7 @@ if (!ctx) {
   appRoot.appendChild(e);
 }
 
-//Buttons
+// ---- Buttons ----
 
 const buttonRow = document.createElement("div");
 buttonRow.style.display = "flex";
@@ -193,18 +197,18 @@ thickButton.textContent = "Thick Marker";
 buttonRow.appendChild(thinButton);
 buttonRow.appendChild(thickButton);
 
-//Sticker buttons
-const stickerEmojis = ["⭐", "🔥", "🐱"];
+// Sticker buttons (Step 9 – data-driven + custom)
+type StickerConfig = { emoji: string };
+
+const stickerConfigs: StickerConfig[] = [
+  { emoji: "⭐" },
+  { emoji: "🔥" },
+  { emoji: "🐱" },
+];
+
 const stickerButtons: HTMLButtonElement[] = [];
 
-for (const emoji of stickerEmojis) {
-  const btn = document.createElement("button");
-  btn.textContent = emoji;
-  stickerButtons.push(btn);
-  buttonRow.appendChild(btn);
-}
-
-//Action buttons
+// Action buttons
 const clearButton = document.createElement("button");
 clearButton.textContent = "Clear";
 buttonRow.appendChild(clearButton);
@@ -217,7 +221,12 @@ const redoButton = document.createElement("button");
 redoButton.textContent = "Redo";
 buttonRow.appendChild(redoButton);
 
-//Tool state (markers vs stickers)
+// Custom sticker button
+const customStickerButton = document.createElement("button");
+customStickerButton.textContent = "Custom Sticker";
+buttonRow.appendChild(customStickerButton);
+
+// ---- Tool state (markers vs stickers) ----
 
 type ToolKind = "marker" | "sticker";
 
@@ -228,10 +237,12 @@ let currentLineWidth = THIN_WIDTH;
 let activeTool: ToolKind = "marker";
 let activeSticker: string | null = null;
 
+// For "fire tool-moved when sticker buttons clicked"
 let lastToolX = canvas.width / 2;
 let lastToolY = canvas.height / 2;
 
 function updateToolSelection() {
+  // reset styles
   thinButton.style.fontWeight = "normal";
   thickButton.style.fontWeight = "normal";
   thinButton.style.outline = "none";
@@ -259,69 +270,7 @@ function updateToolSelection() {
   }
 }
 
-updateToolSelection();
-
-thinButton.addEventListener("click", () => {
-  activeTool = "marker";
-  activeSticker = null;
-  currentLineWidth = THIN_WIDTH;
-  updateToolSelection();
-  notifyToolMoved(lastToolX, lastToolY);
-});
-
-thickButton.addEventListener("click", () => {
-  activeTool = "marker";
-  activeSticker = null;
-  currentLineWidth = THICK_WIDTH;
-  updateToolSelection();
-  notifyToolMoved(lastToolX, lastToolY);
-});
-
-for (const btn of stickerButtons) {
-  btn.addEventListener("click", () => {
-    activeTool = "sticker";
-    activeSticker = btn.textContent ?? null;
-    updateToolSelection();
-
-    // Step 8 requirement: fire "tool-moved" when a sticker button is clicked
-    notifyToolMoved(lastToolX, lastToolY);
-  });
-}
-
-//Display list, undo/redo, and preview
-
-const displayList: DisplayCommand[] = [];
-const redoStack: DisplayCommand[] = [];
-
-let currentCommand: DisplayCommand | null = null;
-let isDrawing = false;
-
-// Preview command: can be MarkerPreview or StickerPreview
-let previewCommand: DisplayCommand | null = null;
-
-//Redraw logic
-
-function redrawCanvas() {
-  if (!ctx) return;
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  for (const command of displayList) {
-    command.display(ctx);
-  }
-
-  if (!isDrawing && previewCommand) {
-    previewCommand.display(ctx);
-  }
-}
-
-canvas.addEventListener("drawing-changed", redrawCanvas);
-
-function notifyDrawingChanged() {
-  canvas.dispatchEvent(new Event("drawing-changed"));
-}
-
-//tool-moved event support
+// ---- tool-moved event support ----
 
 type ToolMovedDetail = { x: number; y: number };
 
@@ -333,6 +282,104 @@ function notifyToolMoved(x: number, y: number) {
     detail: { x, y },
   });
   canvas.dispatchEvent(event);
+}
+
+// ---- Sticker button creation (data-driven) ----
+
+function createStickerButton(config: StickerConfig) {
+  const btn = document.createElement("button");
+  btn.textContent = config.emoji;
+  stickerButtons.push(btn);
+  // insert before Clear / Undo / Redo / Custom, or just append
+  buttonRow.insertBefore(btn, clearButton);
+
+  btn.addEventListener("click", () => {
+    activeTool = "sticker";
+    activeSticker = config.emoji;
+    updateToolSelection();
+
+    // Step 8/9 requirement: fire "tool-moved" when a sticker button is clicked
+    notifyToolMoved(lastToolX, lastToolY);
+  });
+}
+
+// Initialize sticker buttons from data array
+for (const cfg of stickerConfigs) {
+  createStickerButton(cfg);
+}
+
+// Marker tool button handlers
+thinButton.addEventListener("click", () => {
+  activeTool = "marker";
+  activeSticker = null;
+  currentLineWidth = THIN_WIDTH;
+  updateToolSelection();
+  notifyToolMoved(lastToolX, lastToolY); // refresh preview for marker
+});
+
+thickButton.addEventListener("click", () => {
+  activeTool = "marker";
+  activeSticker = null;
+  currentLineWidth = THICK_WIDTH;
+  updateToolSelection();
+  notifyToolMoved(lastToolX, lastToolY);
+});
+
+// Custom sticker handler (Step 9)
+customStickerButton.addEventListener("click", () => {
+  const text = prompt("Custom sticker text", "🧽");
+  if (text === null) return;
+
+  const trimmed = text.trim();
+  if (trimmed === "") return;
+
+  // Represent this new sticker in the same way as the others
+  const newConfig: StickerConfig = { emoji: trimmed };
+  stickerConfigs.push(newConfig);
+  createStickerButton(newConfig);
+
+  // Automatically select the new sticker
+  activeTool = "sticker";
+  activeSticker = trimmed;
+  updateToolSelection();
+
+  // Fire tool-moved so preview appears for the new sticker
+  notifyToolMoved(lastToolX, lastToolY);
+});
+
+// ---- Display list, undo/redo, and preview ----
+
+const displayList: DisplayCommand[] = [];
+const redoStack: DisplayCommand[] = [];
+
+let currentCommand: DisplayCommand | null = null;
+let isDrawing = false;
+
+// Preview command: can be MarkerPreview or StickerPreview
+let previewCommand: DisplayCommand | null = null;
+
+// ---- Redraw logic ----
+
+function redrawCanvas() {
+  if (!ctx) return;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw permanent commands
+  for (const command of displayList) {
+    command.display(ctx);
+  }
+
+  // Draw preview only if not drawing and preview is active
+  if (!isDrawing && previewCommand) {
+    previewCommand.display(ctx);
+  }
+}
+
+canvas.addEventListener("drawing-changed", redrawCanvas);
+
+function notifyDrawingChanged() {
+  canvas.dispatchEvent(new Event("drawing-changed"));
 }
 
 canvas.addEventListener("tool-moved", (event) => {
@@ -358,7 +405,7 @@ canvas.addEventListener("tool-moved", (event) => {
   notifyDrawingChanged();
 });
 
-//Mouse interaction
+// ---- Mouse interaction ----
 
 function startDrawing(event: MouseEvent) {
   if (!ctx) return;
@@ -381,6 +428,7 @@ function startDrawing(event: MouseEvent) {
       "round",
     );
   } else if (activeTool === "sticker" && activeSticker) {
+    // Create a sticker stamp command
     command = new StickerStamp(activeSticker, startX, startY, 32);
   }
 
@@ -389,6 +437,7 @@ function startDrawing(event: MouseEvent) {
   currentCommand = command;
   displayList.push(command);
 
+  // New drawing invalidates redo history
   redoStack.length = 0;
 
   notifyDrawingChanged();
@@ -421,6 +470,7 @@ canvas.addEventListener("mousemove", (event) => {
   if (isDrawing && currentCommand) {
     continueDrawing(event);
   }
+  // Always notify tool movement when the mouse moves over the canvas
   notifyToolMoved(event.offsetX, event.offsetY);
 });
 
@@ -435,7 +485,7 @@ canvas.addEventListener("mouseleave", () => {
   notifyDrawingChanged();
 });
 
-//Button behaviors
+// ---- Button behaviors ----
 
 clearButton.addEventListener("click", () => {
   displayList.length = 0;
@@ -465,3 +515,6 @@ redoButton.addEventListener("click", () => {
   currentCommand = null;
   notifyDrawingChanged();
 });
+
+// Initial tool UI state
+updateToolSelection();
