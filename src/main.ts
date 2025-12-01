@@ -71,7 +71,7 @@ class MarkerPreview implements DisplayCommand {
   }
 
   display(ctx: CanvasRenderingContext2D): void {
-    const radius = this.getLineWidth() * 2; // bigger so it's easy to see
+    const radius = this.getLineWidth(); // tuned to feel closer to actual stroke
 
     ctx.save();
     ctx.beginPath();
@@ -94,7 +94,7 @@ class StickerPreview implements DisplayCommand {
 
   constructor(
     private readonly getEmoji: () => string | null,
-    private readonly size: number = 32,
+    private readonly size: number = 48, // tuned bigger
   ) {
     this.x = 0;
     this.y = 0;
@@ -125,7 +125,7 @@ class StickerStamp implements DisplayCommand {
     private emoji: string,
     private x: number,
     private y: number,
-    private readonly size: number = 32,
+    private readonly size: number = 48, // tuned bigger
   ) {}
 
   drag(x: number, y: number): void {
@@ -152,22 +152,37 @@ const appRoot = (document.querySelector("#app") as HTMLElement | null) ??
 
 appRoot.innerHTML = "";
 
+// Center the whole app in the viewport
+appRoot.style.minHeight = "100vh";
+appRoot.style.display = "flex";
+appRoot.style.flexDirection = "column";
+appRoot.style.alignItems = "center";
+appRoot.style.justifyContent = "center";
+appRoot.style.gap = "12px";
+
 // Title
 const title = document.createElement("h1");
 title.textContent = "Quaint Paint Sketchpad";
 appRoot.appendChild(title);
 
-// Subtitle
+// Subtitle (tuned text)
 const subtitle = document.createElement("p");
 subtitle.textContent =
-  "Draw with markers or place stickers. Use Clear / Undo / Redo / Export.";
+  "Sketch, doodle, and decorate with markers and stickers. Use Clear / Undo / Redo / Export to control your masterpiece.";
 appRoot.appendChild(subtitle);
 
 // Canvas
 const canvas = document.createElement("canvas");
 canvas.id = "sketchCanvas";
-canvas.width = 256;
-canvas.height = 256;
+
+// Make the canvas bigger & give it a clear border/visual
+canvas.width = 512;
+canvas.height = 512;
+canvas.style.border = "2px solid black";
+canvas.style.background = "white";
+canvas.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.3)";
+canvas.style.borderRadius = "8px";
+
 appRoot.appendChild(canvas);
 
 const ctx = canvas.getContext("2d");
@@ -184,7 +199,8 @@ const buttonRow = document.createElement("div");
 buttonRow.style.display = "flex";
 buttonRow.style.flexWrap = "wrap";
 buttonRow.style.gap = "8px";
-buttonRow.style.marginTop = "8px";
+buttonRow.style.marginTop = "12px";
+buttonRow.style.justifyContent = "center"; // center buttons under canvas
 appRoot.appendChild(buttonRow);
 
 // Tool buttons (markers)
@@ -197,13 +213,13 @@ thickButton.textContent = "Thick Marker";
 buttonRow.appendChild(thinButton);
 buttonRow.appendChild(thickButton);
 
-// Sticker buttons (Step 9 – data-driven + custom)
+// Sticker buttons (data-driven + custom)
 type StickerConfig = { emoji: string };
 
 const stickerConfigs: StickerConfig[] = [
   { emoji: "⭐" },
-  { emoji: "🔥" },
-  { emoji: "🐱" },
+  { emoji: "💖" },
+  { emoji: "🍕" },
 ];
 
 const stickerButtons: HTMLButtonElement[] = [];
@@ -221,7 +237,7 @@ const redoButton = document.createElement("button");
 redoButton.textContent = "Redo";
 buttonRow.appendChild(redoButton);
 
-// NEW: Export button (Step 10)
+// Export button (Step 10)
 const exportButton = document.createElement("button");
 exportButton.textContent = "Export PNG";
 buttonRow.appendChild(exportButton);
@@ -235,8 +251,9 @@ buttonRow.appendChild(customStickerButton);
 
 type ToolKind = "marker" | "sticker";
 
-const THIN_WIDTH = 2;
-const THICK_WIDTH = 6;
+// tuned marker widths
+const THIN_WIDTH = 4;
+const THICK_WIDTH = 10;
 
 let currentLineWidth = THIN_WIDTH;
 let activeTool: ToolKind = "marker";
@@ -330,7 +347,7 @@ thickButton.addEventListener("click", () => {
   notifyToolMoved(lastToolX, lastToolY);
 });
 
-// Custom sticker handler (Step 9)
+// Custom sticker handler
 customStickerButton.addEventListener("click", () => {
   const text = prompt("Custom sticker text", "🧽");
   if (text === null) return;
@@ -399,7 +416,7 @@ canvas.addEventListener("tool-moved", (event) => {
     (previewCommand as MarkerPreview).setPosition(x, y);
   } else if (activeTool === "sticker" && activeSticker) {
     if (!(previewCommand instanceof StickerPreview)) {
-      previewCommand = new StickerPreview(() => activeSticker, 32);
+      previewCommand = new StickerPreview(() => activeSticker, 48);
     }
     (previewCommand as StickerPreview).setPosition(x, y);
   } else {
@@ -431,7 +448,7 @@ function startDrawing(event: MouseEvent) {
       "round",
     );
   } else if (activeTool === "sticker" && activeSticker) {
-    command = new StickerStamp(activeSticker, startX, startY, 32);
+    command = new StickerStamp(activeSticker, startX, startY, 48);
   }
 
   if (!command) return;
@@ -518,7 +535,7 @@ redoButton.addEventListener("click", () => {
   notifyDrawingChanged();
 });
 
-// ---- Export button behavior (Step 10) ----
+// ---- Export button behavior (high-res PNG) ----
 
 exportButton.addEventListener("click", () => {
   // Create an offscreen canvas of size 1024x1024
@@ -532,17 +549,16 @@ exportButton.addEventListener("click", () => {
     return;
   }
 
-  // Optional: fill with white background (instead of transparent)
+  // Fill with white background (instead of transparent)
   exportCtx.fillStyle = "white";
   exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
 
-  // Scale so that the existing commands (designed for 256x256)
+  // Scale so that existing commands (designed for 256x256)
   // are drawn appropriately on the 1024x1024 canvas (4x size)
   exportCtx.save();
   exportCtx.scale(4, 4);
 
-  // Replay all commands onto this new context.
-  // IMPORTANT: we do NOT draw the previewCommand here.
+  // Replay all commands onto this new context (no preview)
   for (const command of displayList) {
     command.display(exportCtx);
   }
