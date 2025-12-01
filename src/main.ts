@@ -160,7 +160,7 @@ appRoot.appendChild(title);
 // Subtitle
 const subtitle = document.createElement("p");
 subtitle.textContent =
-  "Draw with markers or place stickers. Use Clear / Undo / Redo.";
+  "Draw with markers or place stickers. Use Clear / Undo / Redo / Export.";
 appRoot.appendChild(subtitle);
 
 // Canvas
@@ -220,6 +220,11 @@ buttonRow.appendChild(undoButton);
 const redoButton = document.createElement("button");
 redoButton.textContent = "Redo";
 buttonRow.appendChild(redoButton);
+
+// NEW: Export button (Step 10)
+const exportButton = document.createElement("button");
+exportButton.textContent = "Export PNG";
+buttonRow.appendChild(exportButton);
 
 // Custom sticker button
 const customStickerButton = document.createElement("button");
@@ -290,7 +295,7 @@ function createStickerButton(config: StickerConfig) {
   const btn = document.createElement("button");
   btn.textContent = config.emoji;
   stickerButtons.push(btn);
-  // insert before Clear / Undo / Redo / Custom, or just append
+  // Insert before Clear to keep stickers grouped near tools
   buttonRow.insertBefore(btn, clearButton);
 
   btn.addEventListener("click", () => {
@@ -298,7 +303,7 @@ function createStickerButton(config: StickerConfig) {
     activeSticker = config.emoji;
     updateToolSelection();
 
-    // Step 8/9 requirement: fire "tool-moved" when a sticker button is clicked
+    // Fire "tool-moved" when a sticker button is clicked
     notifyToolMoved(lastToolX, lastToolY);
   });
 }
@@ -333,7 +338,6 @@ customStickerButton.addEventListener("click", () => {
   const trimmed = text.trim();
   if (trimmed === "") return;
 
-  // Represent this new sticker in the same way as the others
   const newConfig: StickerConfig = { emoji: trimmed };
   stickerConfigs.push(newConfig);
   createStickerButton(newConfig);
@@ -419,7 +423,6 @@ function startDrawing(event: MouseEvent) {
   let command: DisplayCommand | null = null;
 
   if (activeTool === "marker") {
-    // Use currentLineWidth for the new stroke
     command = new MarkerStroke(
       startX,
       startY,
@@ -428,7 +431,6 @@ function startDrawing(event: MouseEvent) {
       "round",
     );
   } else if (activeTool === "sticker" && activeSticker) {
-    // Create a sticker stamp command
     command = new StickerStamp(activeSticker, startX, startY, 32);
   }
 
@@ -514,6 +516,44 @@ redoButton.addEventListener("click", () => {
   displayList.push(restored);
   currentCommand = null;
   notifyDrawingChanged();
+});
+
+// ---- Export button behavior (Step 10) ----
+
+exportButton.addEventListener("click", () => {
+  // Create an offscreen canvas of size 1024x1024
+  const exportCanvas = document.createElement("canvas");
+  exportCanvas.width = 1024;
+  exportCanvas.height = 1024;
+
+  const exportCtx = exportCanvas.getContext("2d");
+  if (!exportCtx) {
+    console.error("Could not create export canvas context.");
+    return;
+  }
+
+  // Optional: fill with white background (instead of transparent)
+  exportCtx.fillStyle = "white";
+  exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+  // Scale so that the existing commands (designed for 256x256)
+  // are drawn appropriately on the 1024x1024 canvas (4x size)
+  exportCtx.save();
+  exportCtx.scale(4, 4);
+
+  // Replay all commands onto this new context.
+  // IMPORTANT: we do NOT draw the previewCommand here.
+  for (const command of displayList) {
+    command.display(exportCtx);
+  }
+
+  exportCtx.restore();
+
+  // Trigger a PNG download
+  const anchor = document.createElement("a");
+  anchor.href = exportCanvas.toDataURL("image/png");
+  anchor.download = "sketchpad.png";
+  anchor.click();
 });
 
 // Initial tool UI state
