@@ -38,6 +38,7 @@ class MarkerStroke implements DisplayCommand {
     ctx.moveTo(first.x, first.y);
 
     if (this.points.length === 1) {
+      // Single click: draw a tiny line so it shows up
       ctx.lineTo(first.x + 0.01, first.y + 0.01);
     } else {
       for (let i = 1; i < this.points.length; i++) {
@@ -51,7 +52,7 @@ class MarkerStroke implements DisplayCommand {
   }
 }
 
-//Tool preview command: draws a circle showing marker size at the mouse position.
+// Tool preview for markers: circle showing marker size at the mouse position.
 class MarkerPreview implements DisplayCommand {
   private x: number;
   private y: number;
@@ -73,13 +74,69 @@ class MarkerPreview implements DisplayCommand {
     ctx.beginPath();
     ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
 
-    // Fill + stroke so it's really visible
     ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
     ctx.fill();
     ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
     ctx.lineWidth = 1;
     ctx.stroke();
 
+    ctx.restore();
+  }
+}
+
+// Sticker preview command: shows where the sticker will be placed.
+class StickerPreview implements DisplayCommand {
+  private x: number;
+  private y: number;
+
+  constructor(
+    private readonly getEmoji: () => string | null,
+    private readonly size: number = 32,
+  ) {
+    this.x = 0;
+    this.y = 0;
+  }
+
+  setPosition(x: number, y: number): void {
+    this.x = x;
+    this.y = y;
+  }
+
+  display(ctx: CanvasRenderingContext2D): void {
+    const emoji = this.getEmoji();
+    if (!emoji) return;
+
+    ctx.save();
+    ctx.font = `${this.size}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.globalAlpha = 0.8;
+    ctx.fillText(emoji, this.x, this.y);
+    ctx.restore();
+  }
+}
+
+// Sticker command: an actual placed sticker in the drawing.
+class StickerStamp implements DisplayCommand {
+  constructor(
+    private emoji: string,
+    private x: number,
+    private y: number,
+    private readonly size: number = 32,
+  ) {}
+
+  drag(x: number, y: number): void {
+    this.x = x;
+    this.y = y;
+  }
+
+  display(ctx: CanvasRenderingContext2D): void {
+    ctx.save();
+    ctx.font = `${this.size}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.globalAlpha = 1.0;
+    ctx.fillText(this.emoji, this.x, this.y);
     ctx.restore();
   }
 }
@@ -99,7 +156,7 @@ appRoot.appendChild(title);
 //Subtitle
 const subtitle = document.createElement("p");
 subtitle.textContent =
-  "Draw with the mouse. Choose Thin or Thick marker. A preview circle shows your tool.";
+  "Draw with markers or place stickers. Use Clear / Undo / Redo.";
 appRoot.appendChild(subtitle);
 
 //Canvas
@@ -126,7 +183,7 @@ buttonRow.style.gap = "8px";
 buttonRow.style.marginTop = "8px";
 appRoot.appendChild(buttonRow);
 
-// Tool buttons
+// Tool buttons (markers)
 const thinButton = document.createElement("button");
 thinButton.textContent = "Thin Marker";
 
@@ -136,7 +193,18 @@ thickButton.textContent = "Thick Marker";
 buttonRow.appendChild(thinButton);
 buttonRow.appendChild(thickButton);
 
-// Action buttons
+//Sticker buttons
+const stickerEmojis = ["⭐", "🔥", "🐱"];
+const stickerButtons: HTMLButtonElement[] = [];
+
+for (const emoji of stickerEmojis) {
+  const btn = document.createElement("button");
+  btn.textContent = emoji;
+  stickerButtons.push(btn);
+  buttonRow.appendChild(btn);
+}
+
+//Action buttons
 const clearButton = document.createElement("button");
 clearButton.textContent = "Clear";
 buttonRow.appendChild(clearButton);
@@ -149,41 +217,76 @@ const redoButton = document.createElement("button");
 redoButton.textContent = "Redo";
 buttonRow.appendChild(redoButton);
 
-//Tool state (thin / thick)
+//Tool state (markers vs stickers)
+
+type ToolKind = "marker" | "sticker";
 
 const THIN_WIDTH = 2;
 const THICK_WIDTH = 6;
 
 let currentLineWidth = THIN_WIDTH;
+let activeTool: ToolKind = "marker";
+let activeSticker: string | null = null;
+
+let lastToolX = canvas.width / 2;
+let lastToolY = canvas.height / 2;
 
 function updateToolSelection() {
   thinButton.style.fontWeight = "normal";
   thickButton.style.fontWeight = "normal";
   thinButton.style.outline = "none";
   thickButton.style.outline = "none";
+  for (const btn of stickerButtons) {
+    btn.style.fontWeight = "normal";
+    btn.style.outline = "none";
+  }
 
-  if (currentLineWidth === THIN_WIDTH) {
-    thinButton.style.fontWeight = "bold";
-    thinButton.style.outline = "2px solid black";
-  } else if (currentLineWidth === THICK_WIDTH) {
-    thickButton.style.fontWeight = "bold";
-    thickButton.style.outline = "2px solid black";
+  if (activeTool === "marker") {
+    if (currentLineWidth === THIN_WIDTH) {
+      thinButton.style.fontWeight = "bold";
+      thinButton.style.outline = "2px solid black";
+    } else if (currentLineWidth === THICK_WIDTH) {
+      thickButton.style.fontWeight = "bold";
+      thickButton.style.outline = "2px solid black";
+    }
+  } else if (activeTool === "sticker" && activeSticker) {
+    for (const btn of stickerButtons) {
+      if (btn.textContent === activeSticker) {
+        btn.style.fontWeight = "bold";
+        btn.style.outline = "2px solid black";
+      }
+    }
   }
 }
 
 updateToolSelection();
 
 thinButton.addEventListener("click", () => {
+  activeTool = "marker";
+  activeSticker = null;
   currentLineWidth = THIN_WIDTH;
   updateToolSelection();
-  notifyDrawingChanged();
+  notifyToolMoved(lastToolX, lastToolY);
 });
 
 thickButton.addEventListener("click", () => {
+  activeTool = "marker";
+  activeSticker = null;
   currentLineWidth = THICK_WIDTH;
   updateToolSelection();
-  notifyDrawingChanged();
+  notifyToolMoved(lastToolX, lastToolY);
 });
+
+for (const btn of stickerButtons) {
+  btn.addEventListener("click", () => {
+    activeTool = "sticker";
+    activeSticker = btn.textContent ?? null;
+    updateToolSelection();
+
+    // Step 8 requirement: fire "tool-moved" when a sticker button is clicked
+    notifyToolMoved(lastToolX, lastToolY);
+  });
+}
 
 //Display list, undo/redo, and preview
 
@@ -193,9 +296,10 @@ const redoStack: DisplayCommand[] = [];
 let currentCommand: DisplayCommand | null = null;
 let isDrawing = false;
 
-let previewCommand: MarkerPreview | null = null;
+// Preview command: can be MarkerPreview or StickerPreview
+let previewCommand: DisplayCommand | null = null;
 
-// ---- Redraw logic ----
+//Redraw logic
 
 function redrawCanvas() {
   if (!ctx) return;
@@ -222,6 +326,9 @@ function notifyDrawingChanged() {
 type ToolMovedDetail = { x: number; y: number };
 
 function notifyToolMoved(x: number, y: number) {
+  lastToolX = x;
+  lastToolY = y;
+
   const event = new CustomEvent<ToolMovedDetail>("tool-moved", {
     detail: { x, y },
   });
@@ -232,11 +339,21 @@ canvas.addEventListener("tool-moved", (event) => {
   const customEvent = event as CustomEvent<ToolMovedDetail>;
   const { x, y } = customEvent.detail;
 
-  if (!previewCommand) {
-    previewCommand = new MarkerPreview(() => currentLineWidth);
-  }
+  if (!ctx) return;
 
-  previewCommand.setPosition(x, y);
+  if (activeTool === "marker") {
+    if (!(previewCommand instanceof MarkerPreview)) {
+      previewCommand = new MarkerPreview(() => currentLineWidth);
+    }
+    (previewCommand as MarkerPreview).setPosition(x, y);
+  } else if (activeTool === "sticker" && activeSticker) {
+    if (!(previewCommand instanceof StickerPreview)) {
+      previewCommand = new StickerPreview(() => activeSticker, 32);
+    }
+    (previewCommand as StickerPreview).setPosition(x, y);
+  } else {
+    previewCommand = null;
+  }
 
   notifyDrawingChanged();
 });
@@ -245,23 +362,32 @@ canvas.addEventListener("tool-moved", (event) => {
 
 function startDrawing(event: MouseEvent) {
   if (!ctx) return;
-  if (event.button !== 0) return;
+  if (event.button !== 0) return; // left mouse only
 
   isDrawing = true;
 
   const startX = event.offsetX;
   const startY = event.offsetY;
 
-  const stroke = new MarkerStroke(
-    startX,
-    startY,
-    currentLineWidth,
-    "#000000",
-    "round",
-  );
+  let command: DisplayCommand | null = null;
 
-  currentCommand = stroke;
-  displayList.push(stroke);
+  if (activeTool === "marker") {
+    // Use currentLineWidth for the new stroke
+    command = new MarkerStroke(
+      startX,
+      startY,
+      currentLineWidth,
+      "#000000",
+      "round",
+    );
+  } else if (activeTool === "sticker" && activeSticker) {
+    command = new StickerStamp(activeSticker, startX, startY, 32);
+  }
+
+  if (!command) return;
+
+  currentCommand = command;
+  displayList.push(command);
 
   redoStack.length = 0;
 
@@ -269,7 +395,7 @@ function startDrawing(event: MouseEvent) {
 }
 
 function continueDrawing(event: MouseEvent) {
-  if (!isDrawing || !currentCommand) return;
+  if (!currentCommand) return;
 
   const x = event.offsetX;
   const y = event.offsetY;
@@ -286,20 +412,23 @@ function stopDrawing() {
   notifyDrawingChanged();
 }
 
-canvas.addEventListener("mousedown", startDrawing);
+canvas.addEventListener("mousedown", (event) => {
+  isDrawing = true;
+  startDrawing(event);
+});
 
 canvas.addEventListener("mousemove", (event) => {
-  if (isDrawing) {
+  if (isDrawing && currentCommand) {
     continueDrawing(event);
   }
-  // Always notify tool movement when the mouse moves over the canvas
   notifyToolMoved(event.offsetX, event.offsetY);
 });
 
-canvas.addEventListener("mouseup", stopDrawing);
+canvas.addEventListener("mouseup", () => {
+  stopDrawing();
+});
 
 canvas.addEventListener("mouseleave", () => {
-  // Mouse left the canvas: stop drawing and hide preview
   isDrawing = false;
   currentCommand = null;
   previewCommand = null;
