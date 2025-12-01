@@ -60,7 +60,10 @@ class MarkerPreview implements DisplayCommand {
   private x: number;
   private y: number;
 
-  constructor(private readonly getLineWidth: () => number) {
+  constructor(
+    private readonly getLineWidth: () => number,
+    private readonly getStrokeStyle: () => string,
+  ) {
     this.x = 0;
     this.y = 0;
   }
@@ -72,15 +75,17 @@ class MarkerPreview implements DisplayCommand {
 
   display(ctx: CanvasRenderingContext2D): void {
     const radius = this.getLineWidth(); // tuned to feel closer to actual stroke
+    const color = this.getStrokeStyle();
 
     ctx.save();
     ctx.beginPath();
     ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
 
-    ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
+    // Light neutral fill + colored outline
+    ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
     ctx.fill();
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
     ctx.stroke();
 
     ctx.restore();
@@ -247,6 +252,34 @@ const customStickerButton = document.createElement("button");
 customStickerButton.textContent = "Custom Sticker";
 buttonRow.appendChild(customStickerButton);
 
+// ---- Marker color controls (Step 12) ----
+
+const colorRow = document.createElement("div");
+colorRow.style.display = "flex";
+colorRow.style.alignItems = "center";
+colorRow.style.gap = "8px";
+colorRow.style.marginTop = "8px";
+
+const colorLabel = document.createElement("span");
+colorLabel.textContent = "Marker Hue:";
+
+const colorSlider = document.createElement("input");
+colorSlider.type = "range";
+colorSlider.min = "0";
+colorSlider.max = "360";
+colorSlider.value = "0";
+
+const colorSwatch = document.createElement("div");
+colorSwatch.style.width = "24px";
+colorSwatch.style.height = "24px";
+colorSwatch.style.borderRadius = "50%";
+colorSwatch.style.border = "1px solid #333";
+
+colorRow.appendChild(colorLabel);
+colorRow.appendChild(colorSlider);
+colorRow.appendChild(colorSwatch);
+appRoot.appendChild(colorRow);
+
 // ---- Tool state (markers vs stickers) ----
 
 type ToolKind = "marker" | "sticker";
@@ -258,6 +291,25 @@ const THICK_WIDTH = 10;
 let currentLineWidth = THIN_WIDTH;
 let activeTool: ToolKind = "marker";
 let activeSticker: string | null = null;
+
+// marker hue state (0–360)
+let currentHue = 0;
+
+function hueToColor(h: number): string {
+  return `hsl(${h}, 80%, 40%)`;
+}
+
+function updateColorSwatch() {
+  colorSwatch.style.background = hueToColor(currentHue);
+}
+
+// initial swatch
+updateColorSwatch();
+
+colorSlider.addEventListener("input", () => {
+  currentHue = Number(colorSlider.value) || 0;
+  updateColorSwatch();
+});
 
 // For "fire tool-moved when sticker buttons clicked"
 let lastToolX = canvas.width / 2;
@@ -411,7 +463,10 @@ canvas.addEventListener("tool-moved", (event) => {
 
   if (activeTool === "marker") {
     if (!(previewCommand instanceof MarkerPreview)) {
-      previewCommand = new MarkerPreview(() => currentLineWidth);
+      previewCommand = new MarkerPreview(
+        () => currentLineWidth,
+        () => hueToColor(currentHue),
+      );
     }
     (previewCommand as MarkerPreview).setPosition(x, y);
   } else if (activeTool === "sticker" && activeSticker) {
@@ -444,7 +499,7 @@ function startDrawing(event: MouseEvent) {
       startX,
       startY,
       currentLineWidth,
-      "#000000",
+      hueToColor(currentHue),
       "round",
     );
   } else if (activeTool === "sticker" && activeSticker) {
@@ -553,10 +608,9 @@ exportButton.addEventListener("click", () => {
   exportCtx.fillStyle = "white";
   exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
 
-  // Scale so that existing commands (designed for 256x256)
-  // are drawn appropriately on the 1024x1024 canvas (4x size)
+  // Scale from 512x512 to 1024x1024 => 2x
   exportCtx.save();
-  exportCtx.scale(4, 4);
+  exportCtx.scale(2, 2);
 
   // Replay all commands onto this new context (no preview)
   for (const command of displayList) {
